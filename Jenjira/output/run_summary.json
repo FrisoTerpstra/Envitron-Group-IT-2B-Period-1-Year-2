@@ -1,0 +1,10 @@
+{
+  "building_id": "e8fffaab-f310-4c9c-a833-a837b68f1658",
+  "description": "office with 200 kWh / 50 kW battery and 50 kWp solar",
+  "target": "consumption_w",
+  "forecast_horizon": "15 minutes (experimental assumption)",
+  "train_rows": 31896,
+  "test_rows": 7974,
+  "alpha": 1.0,
+  "note": "Negative consumption values are preserved pending client clarification."
+}

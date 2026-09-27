@@ -1,0 +1,15 @@
+DATA NOTICE
+
+The datasets used for this prototype were provided by Envitron.
+
+For data privacy, the CSV dataset files are not included in this Git repository.
+
+The following files are required to run this prototype:
+
+- electricity.csv
+- weather.csv
+- buildings.csv
+
+All team members use the same provided datasets for prototype development, testing, and evaluation.
+
+Place these three CSV files in this data folder before running the prototype.
