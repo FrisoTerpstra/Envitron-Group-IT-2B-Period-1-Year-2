@@ -1,0 +1,49 @@
+Based on Envitron’s feedback from the weekly meeting on 29 September 2026 regarding the Ridge Regression prototype development, the prototype was extended to a 36-hour forecast horizon. Four forecasting approaches were compared: Persistence, Copy-Yesterday, Ridge, and Ridge + Weather. Different validation methods were also tested to reduce bias and compare performance across different time periods.  
+--------------------------------------------------------
+Prototype: Extended Ridge 36-Hour-Horizon Forecasting Experiment
+Sub-team: Jenjira Huaisai and Friso Terpstra
+--------------------------------------------------------
+Research goal:
+“How far can a simple, lightweight and explainable Ridge-based approach go?”
+--------------------------------------------------------
+1. What we tested:  
+- Extended Ridge forecasting horizon from 15 minutes to 36 hours (144 future time steps)
+- Compared 3 validation approaches : 80/20, 90/10 and 3-fold walk-forward
+- Tested 4 forecasting models: Persistence, Copy-Yesterday, Ridge, Ridge + Weather
+- Metrics: MAE and RMSE
+- Protected future-data leakage
+- Used new building with fewest negative consumption data 
+(Building ID: 6a1bf87e-d798-4e93-a648-a8e948fc24c2 with 0.134% negative consumption)
+--------------------------------------------------------
+
+2.What we found:  
+2.1 Finding 1: Ridge models beat the simple baselines
+- Ridge-based models outperformed the simple baselines (Persistence & Copy-Yesterday) among 3 validations..
+- Persistence works poorly for long-horizon forecasting. 
+2.2 Finding 2: Ridge + Weather has the lowest MAE
+- Ridge + Weather achieved the lowest MAE, while performance decreased under walk-forward validation
+
+Validation	    Best MAE	                    Best RMSE
+80/20	        Ridge + Weather: 3.00 kW	    Ridge: 4.14 kW
+90/10	        Ridge + Weather: 2.87 kW	    Ridge + Weather: 3.96 kW
+Walk-forward	Ridge + Weather: 3.93 kW	    Ridge: 4.95 kW
+
+2.3 Finding 3: Validation method matters
+- 90/10 showed lower errors than walk-forward.
+- Errors increased with walk-forward validation.
+- Performance changes across different test periods.
+- One chronological split is not enough to select a final model.
+
+--------------------------------------------------------
+3. What it means:  
+- Ridge-based approaches remain promising when the forecast horizon is extended to 36 hours
+- Ridge + Weather produced the lowest average error, but no final model should be selected yet.
+- Performance changes across different test periods, so multiple-period validation gives a more reliable view than a single 80/20 or 90/10 split
+
+--------------------------------------------------------
+4. What to test next:  
+- Test future weather forecasts
+- Test additional buildings before selecting a forecasting approach.
+- Compare results before selecting a forecasting approach.
+
+----------------------------------------------------------
