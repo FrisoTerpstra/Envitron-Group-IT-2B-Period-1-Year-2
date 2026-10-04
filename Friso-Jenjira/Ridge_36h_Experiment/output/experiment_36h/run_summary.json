@@ -1,0 +1,28 @@
+{
+  "experiment": "Prototype 2 - Ridge 36-Hour Forecasting Experiment",
+  "experiment_stage": "Extended experiment after Envitron Week 4 feedback on 29 September 2026",
+  "building_id": "6a1bf87e-d798-4e93-a648-a8e948fc24c2",
+  "description": "farm with 215 kWh / 100 kW battery and 99.9 kWp solar",
+  "forecast_horizon": "36 hours",
+  "resolution": "15 minutes",
+  "steps": 144,
+  "validations": [
+    "80/20 chronological",
+    "90/10 chronological",
+    "3-fold expanding walk-forward"
+  ],
+  "models": [
+    "Persistence",
+    "Copy-Yesterday",
+    "Ridge",
+    "Ridge + Weather"
+  ],
+  "metrics": [
+    "MAE",
+    "RMSE"
+  ],
+  "negative_handling": "59 negative rows excluded from modelling and exported separately; raw data unchanged.",
+  "weather_note": "The supplied dataset has historical observed weather, not archived future-weather forecasts. To prevent leakage, Ridge + Weather uses weather available at the forecast origin only.",
+  "copy_yesterday_note": "For horizons >24h, the baseline uses the most recent fully known same-slot daily profile (48h back), avoiding future leakage.",
+  "runtime_seconds": 4.5562635
+}

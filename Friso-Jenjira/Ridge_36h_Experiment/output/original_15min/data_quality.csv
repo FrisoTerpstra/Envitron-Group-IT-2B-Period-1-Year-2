@@ -1,0 +1,2 @@
+building_id,start,end,observations,missing_consumption,duplicate_timestamps,negative_consumption,negative_pct,dominant_interval,weather_rows
+e8fffaab-f310-4c9c-a833-a837b68f1658,2025-07-17 13:00:00+00:00,2026-09-21 10:30:00+00:00,41364,359,0,736,1.779325016922928,0 days 00:15:00,41364

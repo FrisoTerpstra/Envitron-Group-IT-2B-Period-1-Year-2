@@ -1,0 +1,9 @@
+.DS_Store
+
+# Envitron client data - DO NOT COMMIT
+**/data/*.csv
+
+# Row-level outputs derived from Envitron client data
+**/predictions_selected_horizons.csv
+**/excluded_negative_consumption.csv
+**/predictions.csv

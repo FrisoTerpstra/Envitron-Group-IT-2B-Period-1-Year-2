@@ -1,0 +1,13 @@
+{
+  "experiment": "Prototype 2 - Initial Ridge 15-Minute Forecasting Experiment",
+  "experiment_stage": "Initial experiment before Envitron Week 4 feedback",
+  "building_id": "e8fffaab-f310-4c9c-a833-a837b68f1658",
+  "description": "office with 200 kWh / 50 kW battery and 50 kWp solar",
+  "target": "consumption_w",
+  "forecast_horizon": "15 minutes",
+  "purpose": "Initial controlled experiment used as a reference for the later 36-hour forecasting experiment.",
+  "train_rows": 31896,
+  "test_rows": 7974,
+  "alpha": 1.0,
+  "note": "Negative consumption values were preserved in this initial experiment pending client clarification."
+}
