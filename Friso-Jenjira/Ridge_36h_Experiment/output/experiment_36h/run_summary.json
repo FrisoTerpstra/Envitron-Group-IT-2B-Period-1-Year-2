@@ -24,5 +24,5 @@
   "negative_handling": "59 negative rows excluded from modelling and exported separately; raw data unchanged.",
   "weather_note": "The supplied dataset has historical observed weather, not archived future-weather forecasts. To prevent leakage, Ridge + Weather uses weather available at the forecast origin only.",
   "copy_yesterday_note": "For horizons >24h, the baseline uses the most recent fully known same-slot daily profile (48h back), avoiding future leakage.",
-  "runtime_seconds": 4.5562635
+  "runtime_seconds": 4.160080874999999
 }
