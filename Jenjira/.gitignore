@@ -1,5 +1,0 @@
-# macOS
-.DS_Store
-
-# Envitron client datasets - local only
-data/*.csv
