@@ -1,0 +1,2 @@
+building_id,description,raw_rows,negative_rows_excluded,negative_pct_raw,rows_after_exclusion,start,end
+6a1bf87e-d798-4e93-a648-a8e948fc24c2,farm with 215 kWh / 100 kW battery and 99.9 kWp solar,44147,59,0.1336444152490543,44088,2025-06-18 12:30:00+00:00,2026-09-21 09:00:00+00:00

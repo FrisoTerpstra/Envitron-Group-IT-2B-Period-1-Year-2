@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="KubernetesApiPersistence">{}</component>
-  <component name="KubernetesApiProvider">{
-  &quot;isMigrated&quot;: true
-}</component>
+  <component name="KubernetesApiProvider"><![CDATA[{}]]></component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="~/Downloads/Year 2/Period 1/Project Envitron/Envitron-Group-IT-2B-Period-1-Year-2/.venv" project-jdk-type="Python SDK" />
 </project>
