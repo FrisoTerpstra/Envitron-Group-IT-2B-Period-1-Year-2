@@ -1,0 +1,6 @@
+data/*.csv
+models/*.joblib
+output/*predictions*.csv
+__pycache__/
+*.pyc
+.DS_Store

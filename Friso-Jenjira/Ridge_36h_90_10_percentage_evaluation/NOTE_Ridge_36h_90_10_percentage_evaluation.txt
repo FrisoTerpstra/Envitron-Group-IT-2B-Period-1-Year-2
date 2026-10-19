@@ -1,0 +1,40 @@
+Envitron — Prototype 2: Ridge 36-Hour 90/10 Percentage Evaluation
+Sub-team: Jenjira Huaisai and Friso Terpstra
+Status: Preliminary research results (legacy split)
+--------------------------------------------------------
+Research goal:
+How can the Ridge 36-hour forecast error be interpreted relative to a building's actual consumption?
+--------------------------------------------------------
+1. What we tested:
+- Used one Farm building, approximately 15 months of history (18 June 2025 – 21 September 2026).
+- Excluded 59 negative consumption records from the selected building.
+- Forecasted 36 hours (144 x 15-minute steps).
+- Compared Persistence, Copy-Yesterday, Ridge, and Ridge + Weather.
+- Focused ONLY on the 90/10 chronological split in this isolated experiment.
+- Reported MAE, RMSE, NMAE, NRMSE, and MAPE; excluded near-zero actuals (<0.1 kW) from MAPE.
+--------------------------------------------------------
+2. What we found (reference results, Ridge + Weather, 90/10):
+- Mean actual consumption: 12.88 kW.
+- MAE: 2.87 kW; RMSE: 3.96 kW.
+- NMAE: 22.28%; NRMSE: 30.72%; MAPE: 23.44%.
+- These are error metrics, not a percentage accuracy score.
+- The charts compare all four approaches under the same 90/10 split.
+--------------------------------------------------------
+3. What it means:
+- Relative metrics put the error in context of the building's typical consumption.
+- MAPE and NMAE have different denominators and must not be treated as interchangeable.
+- This experiment is a focused reporting view; earlier multi-validation research remains in Ridge_36h_Experiment.
+- Legacy split may have overlapping 36-hour training targets at the test boundary.
+--------------------------------------------------------
+4. What to test next:
+- Purge training origins with target windows crossing the test start; rerun all metrics.
+- Compare all team prototypes on consistent periods and metric definitions.
+- Evaluate additional buildings, periods, future weather, and large errors.
+--------------------------------------------------------
+5. Where to find results:
+- Run: python3 src/ridge_36h_90_10.py
+- Table: output/metrics_90_10.csv
+- Visuals: output/charts/
+- Saved Ridge models: models/
+--------------------------------------------------------
+Data privacy: Keep Envitron client CSVs private; do not commit publicly.

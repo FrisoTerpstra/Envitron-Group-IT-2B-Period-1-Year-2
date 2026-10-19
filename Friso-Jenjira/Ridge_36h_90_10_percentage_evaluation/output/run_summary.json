@@ -1,0 +1,1 @@
+{"validation":"90/10 chronological only","source":"existing preliminary 36h experiment","note":"Included output files are filtered from prior experiment; run src/ridge_36h_90_10.py to regenerate independently. Legacy split overlap remains."}
