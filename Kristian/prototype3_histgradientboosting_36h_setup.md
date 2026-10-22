@@ -58,7 +58,7 @@ You can run it in two ways.
 
 ### Option A: Run button in PyCharm
 
-1. Right-click the file `prototype3_histgradientboosting_36h.py`.
+1. Right-click the file `prototype3_histgradientboosting_36h_v1.py`.
 2. Click **Run 'prototype3_histgradientboosting_36h'**.
 
 ### Option B: Terminal
@@ -66,13 +66,13 @@ You can run it in two ways.
 Go into the `Kristian` folder and run:
 
 ```bash
-python prototype3_histgradientboosting_36h.py
+python prototype3_histgradientboosting_36h_v1.py
 ```
 
 Or if needed:
 
 ```bash
-python3 prototype3_histgradientboosting_36h.py
+python3 prototype3_histgradientboosting_36h_v1.py
 ```
 
 ## 6. What the script does

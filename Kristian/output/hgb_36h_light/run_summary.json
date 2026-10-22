@@ -1,0 +1,32 @@
+{
+  "experiment": "HistGradientBoosting 36-Hour Forecasting Experiment (Lightweight)",
+  "building_id": "6a1bf87e-d798-4e93-a648-a8e948fc24c2",
+  "description": "farm with 215 kWh / 100 kW battery and 99.9 kWp solar",
+  "forecast_horizon": "36 hours",
+  "resolution": "15 minutes",
+  "steps": 144,
+  "validation": "90/10 chronological",
+  "models": [
+    "Persistence",
+    "Copy-Yesterday",
+    "Persistence"
+  ],
+  "metrics": [
+    "MAE",
+    "RMSE",
+    "NMAE",
+    "NRMSE",
+    "MAPE"
+  ],
+  "negative_handling": "59 negative rows excluded from modelling and exported separately; raw data unchanged.",
+  "weather_mode": "included",
+  "speed_optimizations": [
+    "90/10 validation only",
+    "single HistGradientBoosting variant",
+    "selected-horizon export only",
+    "lightweight chart set only",
+    "early stopping enabled",
+    "bounded tree depth and iterations"
+  ],
+  "runtime_seconds": 24.017897250014357
+}
