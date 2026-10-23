@@ -1,0 +1,5 @@
+run_id,validation,model,eligible_pairs,available_pairs,missing_prediction_pairs,common_pairs,native_coverage_pct,common_pair_coverage_pct
+af51f0a4c3e54adfa4ad166bc1e4f4d3,90_10,Persistence,549504,549504,0,548792,100.0,99.87042860470534
+af51f0a4c3e54adfa4ad166bc1e4f4d3,90_10,Copy-Yesterday,549504,548792,712,548792,99.87042860470534,99.87042860470534
+af51f0a4c3e54adfa4ad166bc1e4f4d3,90_10,HGB,549504,549504,0,548792,100.0,99.87042860470534
+af51f0a4c3e54adfa4ad166bc1e4f4d3,90_10,HGB + Weather,549504,549504,0,548792,100.0,99.87042860470534
