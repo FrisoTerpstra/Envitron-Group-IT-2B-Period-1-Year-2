@@ -1,0 +1,3 @@
+model,training_samples,features,forecast_outputs,training_seconds,one_forecast_median_ms,one_forecast_p95_ms,saved_model_kb,process_peak_ram_mb,data_preparation_seconds
+Ridge,37337,11,144,0.15314,0.46898,0.49065,16.411,705.92,0.84
+Ridge + Weather,37337,19,144,0.16493,0.47879,0.51931,26.019,705.92,0.84
