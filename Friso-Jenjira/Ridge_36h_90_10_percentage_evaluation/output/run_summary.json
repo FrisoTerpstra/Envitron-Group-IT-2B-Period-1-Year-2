@@ -1,1 +1,19 @@
-{"validation":"90/10 chronological only","source":"existing preliminary 36h experiment","note":"Included output files are filtered from prior experiment; run src/ridge_36h_90_10.py to regenerate independently. Legacy split overlap remains."}
+{
+  "experiment": "Ridge 36h 90/10 Percentage Evaluation",
+  "validation": "90/10 chronological only",
+  "status": "PRELIMINARY: legacy split target-window overlap may cause leakage",
+  "train_last_origin": "2026-08-05 01:15:00+00:00",
+  "test_first_origin": "2026-08-05 01:30:00+00:00",
+  "building_id": "6a1bf87e-d798-4e93-a648-a8e948fc24c2",
+  "description": "farm with 215 kWh / 100 kW battery and 99.9 kWp solar",
+  "forecast_steps": 144,
+  "metrics": [
+    "MAE",
+    "RMSE",
+    "NMAE",
+    "NRMSE",
+    "MAPE"
+  ],
+  "weather_note": "Only weather observed at forecast origin used",
+  "runtime_seconds": 2.0308175000000004
+}
