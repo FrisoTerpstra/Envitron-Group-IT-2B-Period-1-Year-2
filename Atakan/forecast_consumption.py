@@ -1,11 +1,20 @@
-"""Electricity forecast evaluation using only Python's standard library.
+"""Electricity forecast comparison using only Python's standard library.
 
 Run: python consumption_forecast.py --building-id YOUR_BUILDING_ID
 Place electricity.csv, weather.csv and buildings.csv in data/ beside this script.
 Uses all available building history; missing target slots are not scored.
 Retains the supplied linear regression (tiny numerical regularization).
 No test-set hyperparameter tuning. Negative consumption values are retained.
-Outputs all 144-step windows, one prediction per test timestamp, metrics and SVG.
+Runs separately fitted models WITH and WITHOUT weather on identical samples.
+Without weather removes all weather features, retaining calendar and consumption lags.
+Both use the common training rows with valid weather and lag values for comparability.
+Outputs metrics_comparison.csv and separate without_weather/ and with_weather/
+folders containing all 144-step windows, scored predictions, metrics and an SVG.
+Older single-model files in the output root are not overwritten; use the new folders.
+Weather: eight variables joined by building_id and 15-minute UTC timestamp.
+Default persistence uses only weather before each forecast origin. The optional
+--weather-mode observed uses recorded future weather for an oracle experiment,
+not an operational forecast. Re-run evaluation after changing weather features.
 """
 
 import argparse
@@ -28,6 +37,8 @@ WEATHER_COLUMNS = [
     "precipitation_mm",
     "cloud_cover_pct",
     "shortwave_radiation_wm2",
+    "direct_radiation_wm2",
+    "diffuse_radiation_wm2",
     "wind_speed_ms",
 ]
 
@@ -128,16 +139,21 @@ def load_quarter_hour_target(path, building_id, target_column):
     return {hour: totals[hour] / counts[hour] for hour in totals}
 
 
-def load_hourly_weather(path, building_id):
+def load_quarter_hour_weather(path, building_id):
+    """Join uploaded weather at its original 15-minute resolution, per building."""
     totals = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(int)
 
-    with path.open(newline="", encoding="utf-8") as file:
+    with path.open(newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
+        required = {"building_id", "timestamp_utc", *WEATHER_COLUMNS}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"Weather CSV is missing columns: {', '.join(sorted(missing))}")
         for row in reader:
             if row["building_id"] != building_id:
                 continue
-            hour = hour_bucket(row["timestamp_utc"])
+            hour = quarter_bucket(row["timestamp_utc"])
             values = {column: safe_float(row.get(column)) for column in WEATHER_COLUMNS}
             if any(value is None for value in values.values()):
                 continue
@@ -150,6 +166,8 @@ def load_hourly_weather(path, building_id):
         weather[hour] = {
             column: totals[hour][column] / count for column in WEATHER_COLUMNS
         }
+    if not weather:
+        raise ValueError(f"No complete weather readings found for building {building_id}.")
     return weather
 
 
@@ -166,7 +184,7 @@ def hours(count):
     return timedelta(hours=count)
 
 
-def raw_features(timestamp, weather_row, lag_24, lag_168):
+def raw_features(timestamp, weather_row, lag_24, lag_168, use_weather=True):
     hour_of_day = timestamp.hour + timestamp.minute / 60
     hour_of_week = timestamp.weekday() * 24 + hour_of_day
     return [
@@ -175,12 +193,7 @@ def raw_features(timestamp, weather_row, lag_24, lag_168):
         math.cos(2 * math.pi * hour_of_day / 24),
         math.sin(2 * math.pi * hour_of_week / (7 * 24)),
         math.cos(2 * math.pi * hour_of_week / (7 * 24)),
-        weather_row["temperature_c"],
-        weather_row["relative_humidity_pct"],
-        weather_row["precipitation_mm"],
-        weather_row["cloud_cover_pct"],
-        weather_row["shortwave_radiation_wm2"],
-        weather_row["wind_speed_ms"],
+        *([weather_row[column] for column in WEATHER_COLUMNS] if use_weather else []),
         lag_24,
         lag_168,
     ]
@@ -296,27 +309,29 @@ def select_window(target):
 
 
 def forecast_window(target, weather, origin, coefficients, means, scales,
-                    typical_by_hour, weather_mode):
+                    typical_by_hour, weather_mode, use_weather=True):
     # Only observations available before this origin enter the forecast history.
     history = {time: value for time, value in target.items() if time < origin}
-    known_weather_times = [time for time in weather if time + hours(1) <= origin]
-    if not known_weather_times:
-        raise ValueError("No completed weather hour available before forecast origin.")
-    last_weather = weather[max(known_weather_times)]
+    last_weather = {}
+    if use_weather:
+        known_weather_times = [time for time in weather if time + STEP <= origin]
+        if not known_weather_times:
+            raise ValueError("No weather reading available before forecast origin.")
+        last_weather = weather[max(known_weather_times)]
     rows = []
     for step in range(HORIZON_STEPS):
         timestamp = origin + step * STEP
-        if weather_mode == "observed":
-            key = timestamp.replace(minute=0, second=0, microsecond=0)
+        if use_weather and weather_mode == "observed":
+            key = timestamp
             if key not in weather:
                 raise ValueError(f"Missing observed weather for {key}.")
             weather_row = weather[key]
         else:
-            # No weather forecast archive was supplied: persist last known weather.
+            # No weather forecast archive was supplied: persist last known weather reading.
             weather_row = last_weather
         lag_24 = lag_or_typical(history, timestamp, 24, typical_by_hour)
         lag_168 = lag_or_typical(history, timestamp, 168, typical_by_hour)
-        predicted = predict(raw_features(timestamp, weather_row, lag_24, lag_168),
+        predicted = predict(raw_features(timestamp, weather_row, lag_24, lag_168, use_weather),
                             coefficients, means, scales)
         history[timestamp] = predicted  # Recursive lag after the first 24 hours.
         actual = target.get(timestamp)
@@ -457,7 +472,7 @@ def main():
     parser.add_argument("--list-buildings", action="store_true")
     parser.add_argument("--weather-mode", choices=["persistence", "observed"],
                         default="persistence", help=(
-                            "Default: last completed weather hour held constant. "
+                            "Default: last known 15-minute weather reading held constant. "
                             "Observed: oracle experiment using future actual weather; "
                             "NOT a leakage-free operational forecast."))
     args = parser.parse_args()
@@ -479,18 +494,17 @@ def main():
     split_index = (split_time - times[0]) // STEP
     if len(times) - split_index < HORIZON_STEPS:
         raise ValueError("The final 10% must span at least 36 hours for a full forecast.")
-    weather = load_hourly_weather(args.weather, building_id)
-    # Hourly historical weather features are shared across their four target slots.
+    weather = load_quarter_hour_weather(args.weather, building_id)
+    # Exact timestamp join: retain the uploaded quarter-hour weather resolution.
     training_weather = {
-        timestamp: weather[timestamp.replace(minute=0, second=0, microsecond=0)]
+        timestamp: weather[timestamp]
         for timestamp in observed_times[:train_count]
-        if timestamp.replace(minute=0, second=0, microsecond=0) in weather
+        if timestamp in weather
     }
     missing_training_weather = train_count - len(training_weather)
     if missing_training_weather:
         print(f"Skipping {missing_training_weather} training readings with missing weather.")
     training_rows, training_targets, typical = make_training_data(target, training_weather, split_time)
-    coefficients, means, scales = fit_ordinary_least_squares(training_rows, training_targets)
 
     # Fixed model; observed history updates only between forecast origins.
     # Final full 36h window overlaps the previous window to cover the test tail.
@@ -498,22 +512,38 @@ def main():
     last_origin = len(times) - HORIZON_STEPS
     if origins[-1] != last_origin:
         origins.append(last_origin)
-    all_rows = []
-    for index in origins:
-        all_rows.extend(forecast_window(target, weather, times[index], coefficients,
-                                        means, scales, typical, args.weather_mode))
-    # Aggregate scores weight each test timestamp once (latest origin wins in overlap).
-    unique_rows = {row["timestamp_utc"]: row for row in all_rows}
-    scored_rows = sorted((row for row in unique_rows.values() if row["actual_w"] is not None),
-                         key=lambda row: row["timestamp_utc"])
     test_values = [target[timestamp] for timestamp in observed_times[train_count:]]
     test_range = max(test_values) - min(test_values)
-    scores = metrics(scored_rows, test_range)
-    write_results_csv(args.output_dir / "forecast_results.csv", all_rows)
-    write_results_csv(args.output_dir / "evaluation_results.csv", scored_rows)
-    write_results_csv(args.output_dir / "metrics.csv", [scores])
-    write_svg_chart(args.output_dir / "forecast_chart.svg", all_rows[:HORIZON_STEPS],
-                    "First 36-hour test forecast")
+    comparison = []
+    evaluation_times = None
+    for name, use_weather in [("without_weather", False), ("with_weather", True)]:
+        # Identical training timestamps and targets for both models. Remove the
+        # weather columns entirely for the baseline, then fit independently.
+        model_rows = training_rows if use_weather else [row[:5] + row[-2:] for row in training_rows]
+        coefficients, means, scales = fit_ordinary_least_squares(model_rows, training_targets)
+        all_rows = []
+        for index in origins:
+            all_rows.extend(forecast_window(
+                target, weather, times[index], coefficients, means, scales,
+                typical, args.weather_mode, use_weather=use_weather))
+        # Each observed timestamp counts once; latest origin wins in tail overlap.
+        unique_rows = {row["timestamp_utc"]: row for row in all_rows}
+        scored_rows = sorted((row for row in unique_rows.values() if row["actual_w"] is not None),
+                             key=lambda row: row["timestamp_utc"])
+        current_times = [row["timestamp_utc"] for row in scored_rows]
+        if evaluation_times is not None and current_times != evaluation_times:
+            raise ValueError("Model evaluation timestamps do not match.")
+        evaluation_times = current_times
+        scores = metrics(scored_rows, test_range)
+        comparison.append({"model": name, **scores})
+        model_dir = args.output_dir / name
+        model_dir.mkdir(parents=True, exist_ok=True)
+        write_results_csv(model_dir / "forecast_results.csv", all_rows)
+        write_results_csv(model_dir / "evaluation_results.csv", scored_rows)
+        write_results_csv(model_dir / "metrics.csv", [scores])
+        write_svg_chart(model_dir / "forecast_chart.svg", all_rows[:HORIZON_STEPS],
+                        f"First 36-hour forecast: {name.replace('_', ' ')}")
+    write_results_csv(args.output_dir / "metrics_comparison.csv", comparison)
     print(f"Building: {building_id}")
     print(f"History: {times[0].isoformat()} to {(times[-1] + STEP).isoformat()} (end exclusive)")
     print(f"Available span: {len(times) / 96:.2f} days; {len(target)} observed quarter-hour readings")
@@ -523,13 +553,27 @@ def main():
     print(f"Training rows after lag/weather availability checks: {len(training_rows)}")
     print(f"Forecasts: {len(origins)} windows, each 36 hours / 144 steps")
     print(f"Scored: {len(scored_rows)} unique test timestamps; latest origin used in tail overlap")
+    print(f"Weather file: {args.weather.resolve()}")
+    print(f"Weather readings for building: {len(weather)} at 15-minute resolution")
+    print(f"Weather range: {min(weather).isoformat()} to {max(weather).isoformat()}")
+    print(f"Weather features ({len(WEATHER_COLUMNS)}): {', '.join(WEATHER_COLUMNS)}")
     print(f"Weather mode: {args.weather_mode}")
     if args.weather_mode == "observed":
         print("WARNING: Oracle weather experiment uses future observed weather.")
     print("NMAE/NRMSE denominator: range of actual consumption over the entire test set.")
     print("MAPE excludes zero actuals; near-zero actuals may produce very large percentages.")
-    for name, value in scores.items():
-        print(f"{name}: {value:.4f}" if value is not None else f"{name}: undefined")
+    print("Both models use the same training rows, targets, split, forecast origins and scoring timestamps.")
+    print("Without weather: calendar patterns and consumption lags only (7 coefficients including intercept).")
+    print("With weather: the same inputs plus 8 weather variables (15 coefficients including intercept).")
+    print()
+    print(f"{'Metric':<30}{'WITHOUT WEATHER':>20}{'WITH WEATHER':>20}")
+    def display(value):
+        return f"{value:.4f}" if value is not None else "undefined"
+    for metric in comparison[0]:
+        if metric == "model":
+            continue
+        print(f"{metric:<30}{display(comparison[0][metric]):>20}{display(comparison[1][metric]):>20}")
+    print("Saved metrics_comparison.csv plus predictions, metrics and charts in without_weather/ and with_weather/.")
     print(f"Results: {args.output_dir.resolve()}")
 
 
