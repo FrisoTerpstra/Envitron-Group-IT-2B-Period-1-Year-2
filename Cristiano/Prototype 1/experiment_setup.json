@@ -1,0 +1,23 @@
+{
+  "building_id": "6a1bf87e-d798-4e93-a648-a8e948fc24c2",
+  "building_type": "farm",
+  "data_start": "2025-06-18 12:30:00+00:00",
+  "data_end": "2026-09-21 09:00:00+00:00",
+  "days": 459.9,
+  "resolution": "15 min",
+  "horizon_steps": 144,
+  "horizon_hours": 36,
+  "split": "90/10 chronological",
+  "train_end": "2026-08-06 09:15:00+00:00",
+  "test_start": "2026-08-06 09:30:00+00:00",
+  "test_origins": 1068,
+  "test_origin_every": "1 hour",
+  "train_origin_every": "2 hours",
+  "cleaning": {
+    "negative_readings_replaced": 59,
+    "total_interpolated": 59
+  },
+  "interval_coverage_pct": 57.56,
+  "normalisation": "NMAE and NRMSE divided by mean actual load in the test set",
+  "weather_note": "Observed weather at target time used as a perfect weather forecast"
+}
