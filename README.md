@@ -14,6 +14,8 @@ This repository contains several experiments for forecasting building electricit
 
 | **Lightweight linear demo** | [`Atakan/forecast_consumption.py`](Atakan/forecast_consumption.py) | A dependency-free ordinary least-squares model that trains on three months of hourly data and forecasts consumption up to 36 hours ahead. |
 
+| 4 Gradient Boosting (HGB) 36-hour forecast with weather| Tests HGB with weather against Ridge, copy-yesterday and copy-last-week over the same 36-hour horizon and 90/10 chronological validation as the Ridge extension.
+
 The Envitron CSV data are not included for privacy. To run a prototype, place `electricity.csv`, `weather.csv`, and `buildings.csv` in that prototype's expected `data/` folder and follow its local README or setup guide.
 
 The empty `test.py` files in some personal folders are placeholders and are not working prototypes.
