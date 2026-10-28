@@ -1,8 +1,8 @@
 {
-  "run_id": "90836f8728d440bdbbbe9aa2a887bf4d",
+  "run_id": "ab40144657054e27b1587d4dc4d4ef38",
   "experiment": "hgb_36h_joint",
   "status": "COMPLETED",
-  "started_at_utc": "2026-10-26T18:20:51.022799+00:00",
+  "started_at_utc": "2026-10-26T21:38:37.848984+00:00",
   "building_id": "6a1bf87e-d798-4e93-a648-a8e948fc24c2",
   "forecast_steps": 144,
   "interval_minutes": 15,
@@ -37,19 +37,19 @@
       "status": "COMPLETED",
       "completed_horizons": 144,
       "model_saved": true,
-      "model_file_bytes": 7903743,
-      "wall_seconds": 47.65655945800245
+      "model_file_bytes": 7903747,
+      "wall_seconds": 55.641413125093095
     },
     "HGB + Weather": {
       "status": "COMPLETED",
       "completed_horizons": 144,
       "model_saved": true,
-      "model_file_bytes": 8413968,
-      "wall_seconds": 67.57309112499934
+      "model_file_bytes": 8413969,
+      "wall_seconds": 61.38821300002746
     }
   },
-  "runtime_seconds": 117.35232537495904,
-  "process_peak_rss_mib": 334.609375,
+  "runtime_seconds": 119.06784050003625,
+  "process_peak_rss_mib": 305.75,
   "data_quality": {
     "description": "farm with 215 kWh / 100 kW battery and 99.9 kWp solar",
     "raw_rows": 44147,
@@ -76,7 +76,7 @@
   "incomplete_test_origins_removed": 578,
   "train_origins_sha256": "a1ed9acf82a525736254370964b3114b57a055c3837b15078e004e4cd246aa04",
   "test_origins_sha256": "cb3e2a71eca18669a3fa7decde318bcd07a57a010dbf013f457ff3a5260d57c5",
-  "finished_at_utc": "2026-10-26T18:22:48.372303+00:00",
+  "finished_at_utc": "2026-10-26T21:40:36.910841+00:00",
   "common_prediction_pairs": 548792,
   "eligible_prediction_pairs": 549504,
   "common_pair_coverage_pct": 99.87042860470534,
