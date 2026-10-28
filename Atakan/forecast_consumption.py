@@ -1,8 +1,27 @@
+"""Electricity forecast comparison using only Python's standard library.
+
+Run: python consumption_forecast.py --building-id YOUR_BUILDING_ID
+Place electricity.csv, weather.csv and buildings.csv in data/ beside this script.
+Uses all available building history; missing target slots are not scored.
+Retains the supplied linear regression (tiny numerical regularization).
+No test-set hyperparameter tuning. Negative consumption values are retained.
+Runs separately fitted models WITH and WITHOUT weather on identical samples.
+Without weather removes all weather features, retaining calendar and consumption lags.
+Both use the common training rows with valid weather and lag values for comparability.
+Outputs metrics_comparison.csv and separate without_weather/ and with_weather/
+folders containing all 144-step windows, scored predictions, metrics and an SVG.
+Older single-model files in the output root are not overwritten; use the new folders.
+Weather: eight variables joined by building_id and 15-minute UTC timestamp.
+Default persistence uses only weather before each forecast origin. The optional
+--weather-mode observed uses recorded future weather for an oracle experiment,
+not an operational forecast. Re-run evaluation after changing weather features.
+"""
+
 import argparse
 import csv
 import math
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -18,42 +37,36 @@ WEATHER_COLUMNS = [
     "precipitation_mm",
     "cloud_cover_pct",
     "shortwave_radiation_wm2",
+    "direct_radiation_wm2",
+    "diffuse_radiation_wm2",
     "wind_speed_ms",
 ]
 
 
+STEP = timedelta(minutes=15)
+HORIZON_STEPS = 144
+
+
 def parse_time(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def quarter_bucket(value):
+    timestamp = parse_time(value)
+    return timestamp.replace(minute=(timestamp.minute // 15) * 15, second=0, microsecond=0)
 
 
 def hour_bucket(value):
     return parse_time(value).replace(minute=0, second=0, microsecond=0)
 
 
-def add_months(dt, months):
-    month_index = dt.month - 1 + months
-    year = dt.year + month_index // 12
-    month = month_index % 12 + 1
-    days_in_month = [
-        31,
-        29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ][month - 1]
-    return dt.replace(year=year, month=month, day=min(dt.day, days_in_month))
-
-
 def safe_float(value):
     try:
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
@@ -107,7 +120,7 @@ def list_buildings(buildings_path):
             print(f"{row['building_id']}  {row.get('description', '')}")
 
 
-def load_hourly_target(path, building_id, target_column):
+def load_quarter_hour_target(path, building_id, target_column):
     totals = defaultdict(float)
     counts = defaultdict(int)
 
@@ -119,38 +132,42 @@ def load_hourly_target(path, building_id, target_column):
             value = safe_float(row.get(target_column))
             if value is None:
                 continue
-            hour = hour_bucket(row["timestamp_utc"])
+            hour = quarter_bucket(row["timestamp_utc"])
             totals[hour] += value
             counts[hour] += 1
 
     return {hour: totals[hour] / counts[hour] for hour in totals}
 
 
-def load_hourly_weather(path, building_id):
+def load_quarter_hour_weather(path, building_id):
+    """Join uploaded weather at its original 15-minute resolution, per building."""
     totals = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(int)
 
-    with path.open(newline="", encoding="utf-8") as file:
+    with path.open(newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
+        required = {"building_id", "timestamp_utc", *WEATHER_COLUMNS}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"Weather CSV is missing columns: {', '.join(sorted(missing))}")
         for row in reader:
             if row["building_id"] != building_id:
                 continue
-            hour = hour_bucket(row["timestamp_utc"])
-            ok = True
-            for column in WEATHER_COLUMNS:
-                value = safe_float(row.get(column))
-                if value is None:
-                    ok = False
-                    break
+            hour = quarter_bucket(row["timestamp_utc"])
+            values = {column: safe_float(row.get(column)) for column in WEATHER_COLUMNS}
+            if any(value is None for value in values.values()):
+                continue
+            for column, value in values.items():
                 totals[hour][column] += value
-            if ok:
-                counts[hour] += 1
+            counts[hour] += 1
 
     weather = {}
     for hour, count in counts.items():
         weather[hour] = {
             column: totals[hour][column] / count for column in WEATHER_COLUMNS
         }
+    if not weather:
+        raise ValueError(f"No complete weather readings found for building {building_id}.")
     return weather
 
 
@@ -158,7 +175,7 @@ def lag_or_typical(history, timestamp, hours_back, typical_by_hour):
     value = history.get(timestamp - hours(hours_back))
     if value is not None:
         return value
-    return typical_by_hour.get(timestamp.hour, 0.0)
+    return typical_by_hour.get(timestamp.hour * 4 + timestamp.minute // 15, 0.0)
 
 
 def hours(count):
@@ -167,7 +184,7 @@ def hours(count):
     return timedelta(hours=count)
 
 
-def raw_features(timestamp, weather_row, lag_24, lag_168):
+def raw_features(timestamp, weather_row, lag_24, lag_168, use_weather=True):
     hour_of_day = timestamp.hour + timestamp.minute / 60
     hour_of_week = timestamp.weekday() * 24 + hour_of_day
     return [
@@ -176,12 +193,7 @@ def raw_features(timestamp, weather_row, lag_24, lag_168):
         math.cos(2 * math.pi * hour_of_day / 24),
         math.sin(2 * math.pi * hour_of_week / (7 * 24)),
         math.cos(2 * math.pi * hour_of_week / (7 * 24)),
-        weather_row["temperature_c"],
-        weather_row["relative_humidity_pct"],
-        weather_row["precipitation_mm"],
-        weather_row["cloud_cover_pct"],
-        weather_row["shortwave_radiation_wm2"],
-        weather_row["wind_speed_ms"],
+        *([weather_row[column] for column in WEATHER_COLUMNS] if use_weather else []),
         lag_24,
         lag_168,
     ]
@@ -267,7 +279,7 @@ def make_training_data(target, weather, split_time):
 
     typical_by_hour = defaultdict(list)
     for timestamp in timestamps:
-        typical_by_hour[timestamp.hour].append(target[timestamp])
+        typical_by_hour[timestamp.hour * 4 + timestamp.minute // 15].append(target[timestamp])
     typical_by_hour = {
         hour: sum(values) / len(values) for hour, values in typical_by_hour.items()
     }
@@ -287,68 +299,81 @@ def make_training_data(target, weather, split_time):
     return rows, y, typical_by_hour
 
 
-def forecast_next_hours(target, weather, split_time, horizon, coefficients, means, scales, typical_by_hour):
-    eval_times = [time for time in sorted(target) if time >= split_time and time in weather][:horizon]
-    if len(eval_times) < horizon:
-        raise ValueError(f"Only found {len(eval_times)} comparable future hours.")
+def select_window(target):
+    """Keep all observations and a regular grid without inventing target values."""
+    if not target:
+        raise ValueError("No valid consumption readings for this building.")
+    start, end = min(target), max(target)
+    times = [start + i * STEP for i in range((end - start) // STEP + 1)]
+    return dict(target), times
 
-    history = {time: value for time, value in target.items() if time < split_time}
+
+def forecast_window(target, weather, origin, coefficients, means, scales,
+                    typical_by_hour, weather_mode, use_weather=True):
+    # Only observations available before this origin enter the forecast history.
+    history = {time: value for time, value in target.items() if time < origin}
+    last_weather = {}
+    if use_weather:
+        known_weather_times = [time for time in weather if time + STEP <= origin]
+        if not known_weather_times:
+            raise ValueError("No weather reading available before forecast origin.")
+        last_weather = weather[max(known_weather_times)]
     rows = []
-
-    for timestamp in eval_times:
+    for step in range(HORIZON_STEPS):
+        timestamp = origin + step * STEP
+        if use_weather and weather_mode == "observed":
+            key = timestamp
+            if key not in weather:
+                raise ValueError(f"Missing observed weather for {key}.")
+            weather_row = weather[key]
+        else:
+            # No weather forecast archive was supplied: persist last known weather reading.
+            weather_row = last_weather
         lag_24 = lag_or_typical(history, timestamp, 24, typical_by_hour)
         lag_168 = lag_or_typical(history, timestamp, 168, typical_by_hour)
-        raw_row = raw_features(timestamp, weather[timestamp], lag_24, lag_168)
-        predicted = predict(raw_row, coefficients, means, scales)
-        history[timestamp] = predicted
-        actual = target[timestamp]
-        rows.append(
-            {
-                "timestamp_utc": timestamp.isoformat().replace("+00:00", "Z"),
-                "predicted_w": predicted,
-                "actual_w": actual,
-                "error_w": predicted - actual,
-                "abs_error_w": abs(predicted - actual),
-            }
-        )
-
+        predicted = predict(raw_features(timestamp, weather_row, lag_24, lag_168, use_weather),
+                            coefficients, means, scales)
+        history[timestamp] = predicted  # Recursive lag after the first 24 hours.
+        actual = target.get(timestamp)
+        rows.append({
+            "forecast_origin_utc": origin.isoformat(),
+            "lead_step": step + 1,
+            "timestamp_utc": timestamp.isoformat(),
+            "predicted_w": predicted,
+            "actual_w": actual,
+            "error_w": predicted - actual if actual is not None else None,
+            "abs_error_w": abs(predicted - actual) if actual is not None else None,
+        })
     return rows
 
 
-def metrics(rows):
-    errors = [row["error_w"] for row in rows]
-    abs_errors = [abs(value) for value in errors]
-    squared = [value * value for value in errors]
-    mae = sum(abs_errors) / len(abs_errors)
-    rmse = math.sqrt(sum(squared) / len(squared))
-    actual_range = max(row["actual_w"] for row in rows) - min(row["actual_w"] for row in rows)
-    nmae = mae / actual_range * 100 if actual_range else 0.0
-    return mae, rmse, nmae
+def metrics(rows, normalization_range=None):
+    """MAPE excludes exact zero actuals; normalized errors use test actual range."""
+    rows = [row for row in rows if row["actual_w"] is not None]
+    if not rows:
+        raise ValueError("Cannot calculate metrics without observed test targets.")
+    mae = sum(abs(row["error_w"]) for row in rows) / len(rows)
+    rmse = math.sqrt(sum(row["error_w"] ** 2 for row in rows) / len(rows))
+    percentages = [abs(row["error_w"] / row["actual_w"]) * 100
+                   for row in rows if row["actual_w"] != 0]
+    if normalization_range is None:
+        actuals = [row["actual_w"] for row in rows]
+        normalization_range = max(actuals) - min(actuals)
+    return {
+        "MAE_W": mae,
+        "RMSE_W": rmse,
+        "MAPE_pct": sum(percentages) / len(percentages) if percentages else None,
+        "NMAE_pct": 100 * mae / normalization_range if normalization_range else None,
+        "NRMSE_pct": 100 * rmse / normalization_range if normalization_range else None,
+        "MAPE_excluded_zero_actuals": len(rows) - len(percentages),
+    }
 
 
 def write_results_csv(path, rows):
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=[
-                "timestamp_utc",
-                "predicted_w",
-                "actual_w",
-                "error_w",
-                "abs_error_w",
-            ],
-        )
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
         writer.writeheader()
-        for row in rows:
-            writer.writerow(
-                {
-                    "timestamp_utc": row["timestamp_utc"],
-                    "predicted_w": f"{row['predicted_w']:.2f}",
-                    "actual_w": f"{row['actual_w']:.2f}",
-                    "error_w": f"{row['error_w']:.2f}",
-                    "abs_error_w": f"{row['abs_error_w']:.2f}",
-                }
-            )
+        writer.writerows(rows)
 
 
 def scale_points(values, point_count, left, top, width, height):
@@ -379,9 +404,15 @@ def write_svg_chart(path, rows, title):
     plot_height = 450
     actual = [row["actual_w"] for row in rows]
     predicted = [row["predicted_w"] for row in rows]
-    all_values = actual + predicted
+    all_values = [value for value in actual if value is not None] + predicted
     scale, minimum, maximum = scale_points(all_values, len(rows), left, top, plot_width, plot_height)
-    actual_points = [scale(index, value) for index, value in enumerate(actual)]
+    actual_segments = [[]]
+    for index, value in enumerate(actual):
+        if value is None:
+            if actual_segments[-1]:
+                actual_segments.append([])
+        else:
+            actual_segments[-1].append(scale(index, value))
     predicted_points = [scale(index, value) for index, value in enumerate(predicted)]
 
     y_ticks = []
@@ -392,7 +423,7 @@ def write_svg_chart(path, rows, title):
 
     x_ticks = []
     for index in range(0, len(rows), max(1, len(rows) // 6)):
-        x, _ = scale(index, actual[index])
+        x, _ = scale(index, predicted[index])
         label = rows[index]["timestamp_utc"][5:16].replace("T", " ")
         x_ticks.append((x, label))
 
@@ -414,13 +445,13 @@ def write_svg_chart(path, rows, title):
 
     svg.extend(
         [
-            f'<polyline points="{polyline(actual_points)}" fill="none" stroke="#1a73e8" stroke-width="3"/>',
+            *[f'<polyline points="{polyline(segment)}" fill="none" stroke="#1a73e8" stroke-width="3"/>' for segment in actual_segments if segment],
             f'<polyline points="{polyline(predicted_points)}" fill="none" stroke="#d93025" stroke-width="3"/>',
             f'<line x1="{left}" y1="{height - 75}" x2="{left + 40}" y2="{height - 75}" stroke="#1a73e8" stroke-width="4"/>',
             f'<text x="{left + 52}" y="{height - 70}" font-family="Arial" font-size="14" fill="#202124">Actual</text>',
             f'<line x1="{left + 145}" y1="{height - 75}" x2="{left + 185}" y2="{height - 75}" stroke="#d93025" stroke-width="4"/>',
             f'<text x="{left + 197}" y="{height - 70}" font-family="Arial" font-size="14" fill="#202124">Predicted</text>',
-            f'<text x="{left}" y="{height - 35}" font-family="Arial" font-size="13" fill="#5f6368">Hourly average watts. Model trained on the first 3 calendar months only.</text>',
+            f'<text x="{left}" y="{height - 35}" font-family="Arial" font-size="13" fill="#5f6368">15-minute average watts. Training: first 90% of available readings. Gaps in actuals are not scored.</text>',
             "</svg>",
         ]
     )
@@ -429,67 +460,121 @@ def write_svg_chart(path, rows, title):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Forecast electricity consumption up to 36 hours ahead.")
+    parser = argparse.ArgumentParser(description=(
+        "All available history, chronological 90/10 split, 36-hour (144-step) forecasts. "
+        "Input consumption must be power in watts, not interval energy."))
     parser.add_argument("--electricity", type=Path, default=DEFAULT_ELECTRICITY)
     parser.add_argument("--weather", type=Path, default=DEFAULT_WEATHER)
     parser.add_argument("--buildings", type=Path, default=DEFAULT_BUILDINGS)
     parser.add_argument("--building-id", default=None)
     parser.add_argument("--target", default="consumption_w")
-    parser.add_argument("--horizon", type=int, default=36)
-    parser.add_argument("--train-months", type=int, default=3)
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--list-buildings", action="store_true")
+    parser.add_argument("--weather-mode", choices=["persistence", "observed"],
+                        default="persistence", help=(
+                            "Default: last known 15-minute weather reading held constant. "
+                            "Observed: oracle experiment using future actual weather; "
+                            "NOT a leakage-free operational forecast."))
     args = parser.parse_args()
-
+    prepare_folders_and_check_files(args.electricity, args.weather, args.buildings, args.output_dir)
     if args.list_buildings:
-        prepare_folders_and_check_files(args.electricity, args.weather, args.buildings, args.output_dir)
         list_buildings(args.buildings)
         return
-
-    prepare_folders_and_check_files(args.electricity, args.weather, args.buildings, args.output_dir)
     building = choose_building(args.buildings, args.building_id)
     building_id = building["building_id"]
-
-    target = load_hourly_target(args.electricity, building_id, args.target)
-    weather = load_hourly_weather(args.weather, building_id)
+    target = load_quarter_hour_target(args.electricity, building_id, args.target)
     if not target:
         raise ValueError(f"No electricity rows found for building {building_id}.")
+    target, times = select_window(target)
+    observed_times = sorted(target)
+    train_count = len(observed_times) * 9 // 10
+    if train_count == 0:
+        raise ValueError("Not enough readings for a chronological train/test split.")
+    split_time = observed_times[train_count]
+    split_index = (split_time - times[0]) // STEP
+    if len(times) - split_index < HORIZON_STEPS:
+        raise ValueError("The final 10% must span at least 36 hours for a full forecast.")
+    weather = load_quarter_hour_weather(args.weather, building_id)
+    # Exact timestamp join: retain the uploaded quarter-hour weather resolution.
+    training_weather = {
+        timestamp: weather[timestamp]
+        for timestamp in observed_times[:train_count]
+        if timestamp in weather
+    }
+    missing_training_weather = train_count - len(training_weather)
+    if missing_training_weather:
+        print(f"Skipping {missing_training_weather} training readings with missing weather.")
+    training_rows, training_targets, typical = make_training_data(target, training_weather, split_time)
 
-    first_time = min(target)
-    split_time = add_months(first_time, args.train_months)
-    training_rows, training_targets, typical_by_hour = make_training_data(target, weather, split_time)
-    coefficients, means, scales = fit_ordinary_least_squares(training_rows, training_targets)
-    result_rows = forecast_next_hours(
-        target,
-        weather,
-        split_time,
-        args.horizon,
-        coefficients,
-        means,
-        scales,
-        typical_by_hour,
-    )
-
-    csv_path = args.output_dir / "forecast_results.csv"
-    chart_path = args.output_dir / "forecast_chart.svg"
-    write_results_csv(csv_path, result_rows)
-    write_svg_chart(
-        chart_path,
-        result_rows,
-        f"36 hour forecast for {building_id}",
-    )
-
-    mae, rmse, nmae = metrics(result_rows)
+    # Fixed model; observed history updates only between forecast origins.
+    # Final full 36h window overlaps the previous window to cover the test tail.
+    origins = list(range(split_index, len(times) - HORIZON_STEPS + 1, HORIZON_STEPS))
+    last_origin = len(times) - HORIZON_STEPS
+    if origins[-1] != last_origin:
+        origins.append(last_origin)
+    test_values = [target[timestamp] for timestamp in observed_times[train_count:]]
+    test_range = max(test_values) - min(test_values)
+    comparison = []
+    evaluation_times = None
+    for name, use_weather in [("without_weather", False), ("with_weather", True)]:
+        # Identical training timestamps and targets for both models. Remove the
+        # weather columns entirely for the baseline, then fit independently.
+        model_rows = training_rows if use_weather else [row[:5] + row[-2:] for row in training_rows]
+        coefficients, means, scales = fit_ordinary_least_squares(model_rows, training_targets)
+        all_rows = []
+        for index in origins:
+            all_rows.extend(forecast_window(
+                target, weather, times[index], coefficients, means, scales,
+                typical, args.weather_mode, use_weather=use_weather))
+        # Each observed timestamp counts once; latest origin wins in tail overlap.
+        unique_rows = {row["timestamp_utc"]: row for row in all_rows}
+        scored_rows = sorted((row for row in unique_rows.values() if row["actual_w"] is not None),
+                             key=lambda row: row["timestamp_utc"])
+        current_times = [row["timestamp_utc"] for row in scored_rows]
+        if evaluation_times is not None and current_times != evaluation_times:
+            raise ValueError("Model evaluation timestamps do not match.")
+        evaluation_times = current_times
+        scores = metrics(scored_rows, test_range)
+        comparison.append({"model": name, **scores})
+        model_dir = args.output_dir / name
+        model_dir.mkdir(parents=True, exist_ok=True)
+        write_results_csv(model_dir / "forecast_results.csv", all_rows)
+        write_results_csv(model_dir / "evaluation_results.csv", scored_rows)
+        write_results_csv(model_dir / "metrics.csv", [scores])
+        write_svg_chart(model_dir / "forecast_chart.svg", all_rows[:HORIZON_STEPS],
+                        f"First 36-hour forecast: {name.replace('_', ' ')}")
+    write_results_csv(args.output_dir / "metrics_comparison.csv", comparison)
     print(f"Building: {building_id}")
-    print(f"Description: {building.get('description', '')}")
-    print(f"Training window: {first_time.isoformat()} to {split_time.isoformat()}")
-    print(f"Training rows used: {len(training_rows)} hourly rows")
-    print(f"Forecast compared with actuals: {len(result_rows)} hours")
-    print(f"MAE: {mae:,.2f} W")
-    print(f"RMSE: {rmse:,.2f} W")
-    print(f"Normalized MAE: {nmae:.2f}% of actual range")
-    print(f"Results CSV: {csv_path.resolve()}")
-    print(f"Chart SVG: {chart_path.resolve()}")
+    print(f"History: {times[0].isoformat()} to {(times[-1] + STEP).isoformat()} (end exclusive)")
+    print(f"Available span: {len(times) / 96:.2f} days; {len(target)} observed quarter-hour readings")
+    print(f"Missing intervals: {len(times) - len(target)} (not imputed or scored)")
+    print(f"Chronological 90/10 split: {train_count} training readings; {len(target)-train_count} test readings")
+    print(f"Split: {split_time.isoformat()}; no shuffling or test-set fitting")
+    print(f"Training rows after lag/weather availability checks: {len(training_rows)}")
+    print(f"Forecasts: {len(origins)} windows, each 36 hours / 144 steps")
+    print(f"Scored: {len(scored_rows)} unique test timestamps; latest origin used in tail overlap")
+    print(f"Weather file: {args.weather.resolve()}")
+    print(f"Weather readings for building: {len(weather)} at 15-minute resolution")
+    print(f"Weather range: {min(weather).isoformat()} to {max(weather).isoformat()}")
+    print(f"Weather features ({len(WEATHER_COLUMNS)}): {', '.join(WEATHER_COLUMNS)}")
+    print(f"Weather mode: {args.weather_mode}")
+    if args.weather_mode == "observed":
+        print("WARNING: Oracle weather experiment uses future observed weather.")
+    print("NMAE/NRMSE denominator: range of actual consumption over the entire test set.")
+    print("MAPE excludes zero actuals; near-zero actuals may produce very large percentages.")
+    print("Both models use the same training rows, targets, split, forecast origins and scoring timestamps.")
+    print("Without weather: calendar patterns and consumption lags only (7 coefficients including intercept).")
+    print("With weather: the same inputs plus 8 weather variables (15 coefficients including intercept).")
+    print()
+    print(f"{'Metric':<30}{'WITHOUT WEATHER':>20}{'WITH WEATHER':>20}")
+    def display(value):
+        return f"{value:.4f}" if value is not None else "undefined"
+    for metric in comparison[0]:
+        if metric == "model":
+            continue
+        print(f"{metric:<30}{display(comparison[0][metric]):>20}{display(comparison[1][metric]):>20}")
+    print("Saved metrics_comparison.csv plus predictions, metrics and charts in without_weather/ and with_weather/.")
+    print(f"Results: {args.output_dir.resolve()}")
 
 
 if __name__ == "__main__":
