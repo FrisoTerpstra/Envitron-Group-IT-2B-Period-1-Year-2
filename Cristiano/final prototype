@@ -1,0 +1,148 @@
+import argparse
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+
+# --- Configuration Constants ---
+BUILDING_ID = "6a1bf87e-d798-4e93-a648-a8e948fc24c2"
+STEPS_PER_HOUR = 4                      # 15-minute readings -> 4 per hour
+HORIZON_STEPS = 36 * STEPS_PER_HOUR     # 144 steps = 36 hours ahead
+DAY_STEPS = 24 * STEPS_PER_HOUR          # 96 steps = 1 day
+WEEK_STEPS = 7 * DAY_STEPS               # 672 steps = 1 week
+
+WEATHER_COLS = [
+    "temperature_c", "relative_humidity_pct", "precipitation_mm",
+    "cloud_cover_pct", "shortwave_radiation_wm2", "wind_speed_ms"
+]
+
+
+def load_and_clean_data(elec_path, weather_path):
+    """Loads electricity and weather data, aligns timestamps, and cleans values."""
+    # Load raw CSVs
+    elec = pd.read_csv(elec_path)
+    weather = pd.read_csv(weather_path)
+
+    # Filter for the specific target building
+    elec = elec[elec["building_id"] == BUILDING_ID]
+    weather = weather[weather["building_id"] == BUILDING_ID]
+
+    # Convert timestamps to datetime format
+    elec["timestamp_utc"] = pd.to_datetime(elec["timestamp_utc"], utc=True)
+    weather["timestamp_utc"] = pd.to_datetime(weather["timestamp_utc"], utc=True)
+
+    # Merge electricity and weather datasets on timestamp
+    df = elec.set_index("timestamp_utc")[["consumption_w"]].join(
+        weather.set_index("timestamp_utc")[WEATHER_COLS], how="left"
+    ).sort_index()
+
+    # Ensure fixed 15-minute intervals
+    df = df[~df.index.duplicated()].asfreq("15min")
+
+    # Convert Watts to kilowatts (kW)
+    df["load_kw"] = df.pop("consumption_w") / 1000.0
+
+    # Fix invalid negative readings using interpolation
+    df.loc[df["load_kw"] < 0, "load_kw"] = np.nan
+    df["load_kw"] = df["load_kw"].interpolate(method="linear")
+    df[WEATHER_COLS] = df[WEATHER_COLS].interpolate(method="linear")
+
+    return df
+
+
+def create_features(df):
+    """Creates easy-to-understand lag, temporal, and rolling features."""
+    data = df.copy()
+
+    # Time-based features (Dutch local time)
+    local_time = data.index.tz_convert("Europe/Amsterdam")
+    data["hour"] = local_time.hour
+    data["day_of_week"] = local_time.dayofweek
+    data["is_weekend"] = (data["day_of_week"] >= 5).astype(int)
+
+    # Historical load lags (past consumption)
+    data["lag_15m"] = data["load_kw"].shift(1)
+    data["lag_1h"] = data["load_kw"].shift(4)
+    data["lag_1d"] = data["load_kw"].shift(DAY_STEPS)
+    data["lag_1w"] = data["load_kw"].shift(WEEK_STEPS)
+
+    # Simple rolling averages
+    data["rolling_mean_24h"] = data["load_kw"].rolling(window=DAY_STEPS).mean()
+
+    return data.dropna()
+
+
+def calculate_metrics(y_true, y_pred):
+    """Calculates basic performance metrics (MAE, RMSE, MAPE)."""
+    error = y_pred - y_true
+    mae = np.mean(np.abs(error))
+    rmse = np.sqrt(np.mean(error ** 2))
+    mape = np.mean(np.abs(error / y_true)) * 100
+    
+    mean_load = np.mean(y_true)
+    nmae = (mae / mean_load) * 100
+    nrmse = (rmse / mean_load) * 100
+
+    return {
+        "MAE (kW)": round(mae, 2),
+        "RMSE (kW)": round(rmse, 2),
+        "MAPE (%)": round(mape, 1),
+        "NMAE (%)": round(nmae, 1),
+        "NRMSE (%)": round(nrmse, 1)
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Simple 36-Hour Building Energy Demand Forecast")
+    parser.add_argument("--elec", default="electricity.csv", help="Path to electricity CSV file")
+    parser.add_argument("--weather", default="weather.csv", help="Path to weather CSV file")
+    args = parser.parse_args()
+
+    print("Loading data...")
+    df = load_and_clean_data(args.elec, args.weather)
+    featured_df = create_features(df)
+
+    # Simple 90/10 Train/Test Chronological Split
+    split_idx = int(len(featured_df) * 0.90)
+    train_data = featured_df.iloc[:split_idx]
+    test_data = featured_df.iloc[split_idx:]
+
+    print(f"Training samples: {len(train_data):,} | Testing samples: {len(test_data):,}")
+
+    # Define predictor variables (X) and target variable (y)
+    feature_columns = [col for col in featured_df.columns if col != "load_kw"]
+    
+    X_train, y_train = train_data[feature_columns], train_data["load_kw"]
+    X_test, y_test = test_data[feature_columns], test_data["load_kw"]
+
+    # --- Train Models ---
+    print("\nTraining Models...")
+    
+    # Model 1: Gradient Boosting
+    gbm_model = HistGradientBoostingRegressor(random_state=42)
+    gbm_model.fit(X_train, y_train)
+
+    # Model 2: Ridge Regression
+    ridge_model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+    ridge_model.fit(X_train, y_train)
+
+    # --- Evaluate Predictions ---
+    gbm_preds = gbm_model.predict(X_test)
+    ridge_preds = ridge_model.predict(X_test)
+    naive_day_preds = test_data["lag_1d"].values
+
+    # Output Results
+    print("\n=== Test Evaluation Results ===")
+    results = pd.DataFrame({
+        "Gradient Boosting (HGB)": calculate_metrics(y_test.values, gbm_preds),
+        "Ridge Regression": calculate_metrics(y_test.values, ridge_preds),
+        "Naive (Yesterday Same Time)": calculate_metrics(y_test.values, naive_day_preds)
+    })
+    
+    print(results.T.to_string())
+
+
+if __name__ == "__main__":
+    main()
